@@ -12,12 +12,12 @@ A place to share some knowledge about  **Machine Learning**
 - [Cases](#cases)
 
 ## Templates
-testes
-[**Templates Documentation**]:(doc/references_temp.md)
+
+[**Templates Documentation**](ml/doc/references_temp.md)
 
 ## Functions Library
 
-[**Functions Documentation**]:(doc/references_func.md)
+[**Functions Documentation**](ml/doc/references_func.md)
 
 ## Cases
 
