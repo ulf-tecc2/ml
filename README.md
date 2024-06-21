@@ -13,11 +13,11 @@ A place to share some knowledge about  **Machine Learning**
 
 ## Templates
 
-[**Templates Documentation**](docs/references_temp.md)
+[**Templates Documentation**](https://ulf-tecc2.github.io/ml/site/references_temp/)
 
 ## Functions Library
 
-[**Functions Documentation**](/docs/references_func.md)
+[**Functions Documentation**](https://ulf-tecc2.github.io/ml/site/references_func/)
 
 ## Cases
 
