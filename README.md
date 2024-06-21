@@ -13,11 +13,11 @@ A place to share some knowledge about  **Machine Learning**
 
 ## Templates
 
-[**Templates Documentation**](ml/doc/references_temp.md)
+[**Templates Documentation**](ml/docs/references_temp.md)
 
 ## Functions Library
 
-[**Functions Documentation**](ml/doc/references_func.md)
+[**Functions Documentation**](ml/docs/references_func.md)
 
 ## Cases
 
