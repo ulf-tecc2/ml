@@ -35,7 +35,7 @@ git init
 
 - adicionar o repositorio criado como remote no Github:
 
-git remote add origin https://github.com/XXXXXXXX.git
+git remote add origin git@github.XXXXXX_ml.git
 
 - adicionar os arquivos ao Github
 

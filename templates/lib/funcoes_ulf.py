@@ -40,7 +40,7 @@ def plot_boxplot_for_variables(df , variables_list):
         >>> plot_boxplot_for_variables(df, ['va1' , 'var2' , 'var3'])
         return None
 
-    Args:
+    Parameters:
         df (DataFrame): DataFrame to be analysed.
         variables_list (list): variable list.
 
@@ -89,15 +89,13 @@ def plot_frequencias_valores_atributos(df, lista_atributos):
     """
     Plot the frequency graphic for the attribute values for each variable in lista_atributos.
 
-    Parameters
-    ----------
-    df : DataFrame to be analysed
+    Parameters:
+        df (DataFrame): DataFrame to be analysed
 
-    lista_atributos : variable list 
+        lista_atributos (list): variable list 
 
-    Returns
-    -------
-    None.
+    Returns:
+        (None):
 
     """
     plt.figure(figsize=(15, 45))
@@ -114,16 +112,13 @@ def plot_correlation_heatmap(df, lista_variaveis ):
     """
     Plot the correlation betwenn pairs of continuos variables.
 
-    Parameters
-    ----------
-    df : DataFrame to be analysed
+    Parameters:
+        df (DataFrame): DataFrame to be analysed
 
-    lista_variaveis: continuos variables list
+        lista_variaveis (list): continuos variable list 
 
-
-    Returns
-    -------
-    None
+    Returns:
+        (None):
 
     """
     cv_df = df[lista_variaveis]
@@ -142,21 +137,17 @@ def analyse_correlation_continuos_variables(df, lista_variaveis , quant_maximos)
     """
     Analyse and plot the correlation betwenn pairs of continuos variables.
 
-    Parameters
-    ----------
-    df : DataFrame to be analysed
+    Parameters:
+        df (DataFrame): DataFrame to be analysed
 
-    lista_variaveis: continuos variables list
+        lista_variaveis (list): variable list 
+        
+        quant_maximos : number of maximum values
 
-    quant_maximos : number of maximum values
-
-
-    Returns
-    -------
-    top_pairs_df : sorted DataFrame with Variable1 | Variable 2 | Correlation
-    corr_matrix : Correlation matrix with p-values on the   upper triangle 
-
-
+    Returns:
+        top_pairs_df (DataFrame): sorted DataFrame with Variable1 | Variable 2 | Correlation
+        
+        corr_matrix (Array): Correlation matrix with p-values on the   upper triangle 
     """
     cv_df = df[lista_variaveis]
 
@@ -207,18 +198,15 @@ def analyse_plot_correlation_categorical_variables(df, lista_variaveis):
         H0: dependent variables
         H1: independent variables
 
-    Parameters
-    ----------
-    df : DataFrame to be analysed
+    Parameters:
+        df (DataFrame): DataFrame to be analysed
 
-    lista_variaveis : Variable list
+        lista_variaveis (list): variable list 
 
-    Returns
-    -------
-    resultant : Dataframe with all p-values
-    lista_resultado_analise : array with Variable1 | Variable 2 | p-value
-
-
+    Returns:
+        resultant (DataFrame): Dataframe with all p-values
+        
+        lista_resultado_analise (Array): array with Variable1 | Variable 2 | p-value
     """
     resultant = pd.DataFrame(data=[(0 for i in range(len(lista_variaveis))) for i in range(len(lista_variaveis))],
                              columns=list(lista_variaveis), dtype=float)
@@ -248,22 +236,16 @@ def analyse_plot_correlation_categorical_variables(df, lista_variaveis):
 
 
 def fill_categoric_field_with_value(serie, replace_nan):
+    """Replace categorical value with int value.
+
+    Parameters:
+        serie (Series): data to be replace categorical with int
+        replace_nan (Boolean): flag to replace nan with N/A
+        
+    Returns:
+        (Series): replaced values
+        
     """
-
-
-    Parameters
-    ----------
-    serie : TYPE
-        DESCRIPTION.
-    replace_nan : Boolean. True Replace nan values by 'N/A' .
-
-    Returns
-    -------
-    TYPE
-        DESCRIPTION.
-
-    """
-
     names = serie.unique()
     values = list(range(1, names.size + 1))
 

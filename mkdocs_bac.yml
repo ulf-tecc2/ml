@@ -1,0 +1,16 @@
+site_name: ML Library Documentation
+
+theme:
+  name: "material"
+  
+plugins:
+  - mkdocstrings
+  
+nav:
+  - Home: index.md
+  - Tutorials:
+      - MKDOCS guide: htg_mkdocs.md
+  - Source Code: 
+      - Functions Library: references_func.md
+      - Templates ML: references_temp.md
+  - Cases: cases.md

@@ -1,4 +1,5 @@
-# Welcome to Ulf ML Repository
+# Ulf ML Repository
 
-For full documentation visit [mkdocs.org](https://www.mkdocs.org).
-
+[Functions Documentation](references_func.md).
+   
+[Templates Documentation](references_temp.md).

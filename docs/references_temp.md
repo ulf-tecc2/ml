@@ -4,9 +4,6 @@
 
 ::: templates.template_clusterizacao
 
-```python
---8<-- "templates.template_clusterizacao.py"
-```
 
 ## Data Preprocessing
 

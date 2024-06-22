@@ -1,3 +1,8 @@
+hide:
+  - navigation
+  - toc
+
+
 site_name: ML Library Documentation
 
 theme:
@@ -5,12 +10,7 @@ theme:
   
 plugins:
   - mkdocstrings
-  
+
 nav:
-  - Home: index.md
-  - Tutorials:
-      - MKDOCS guide: htg_mkdocs.md
-  - Source Code: 
-      - Functions Library: references_func.md
-      - Templates ML: references_temp.md
-  - Cases: cases.md
+  - Functions Library: references_func.md
+  - Templates ML: references_temp.md
