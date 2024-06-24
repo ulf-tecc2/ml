@@ -4,7 +4,7 @@
 
 ## Documentation
 
-[**Documentation**]:(https://ulf-tecc2.github.io/ml/)
+[**Documentation**](https://ulf-tecc2.github.io/ml/)
 
 ## Functions Library
 
