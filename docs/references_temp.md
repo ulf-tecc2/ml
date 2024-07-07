@@ -1,13 +1,24 @@
 # ML Templates
 
+## Data Preprocessing
+
+::: templates.template_pre_proces
+
 ## Clusterization 
 
 ::: templates.template_clusterizacao
 
+## PCA
 
-## Data Preprocessing
+::: templates.template_pca
 
-::: templates.template_pre_proces
+## ANACOR
+
+::: templates.template_anacor
+
+## MCA
+
+::: templates.template_MCA
 
 ## Show Shapefile 
 

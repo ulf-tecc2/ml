@@ -58,6 +58,29 @@ def plot_boxplot_for_variables(df , variables_list):
     
     return
 
+
+def print_count_cat_var_values(df  , lista_atributos ):
+    """
+    Print the attribute values for each categorical variable in lista_atributos.
+
+    Parameters:
+        df (DataFrame): DataFrame to be analysed
+
+        lista_atributos (list): variable list 
+
+    Returns:
+        (None):
+
+    """
+    for i , j in enumerate(lista_atributos):
+        a = df[j].value_counts()
+        a = a.sort_values(ascending=False)
+        print(f"\n Count values for Variable {j}")
+        for index, value in a.items():
+            print(f"{index} ==> {value}")
+
+
+
 def search_for_categorical_variables(df):
     """Identify how many unique values exists in each column.
 
@@ -98,12 +121,24 @@ def plot_frequencias_valores_atributos(df, lista_atributos):
         (None):
 
     """
-    plt.figure(figsize=(15, 45))
-    for i in enumerate(lista_atributos):
-        plt.subplot(12, 3, i[0]+1)
-        grafico = sns.barplot(x=i[1], y=i[1],
-                              data=df, estimator=lambda x: len(x) / len(df) * 100)
-        grafico.set(ylabel="Percent")
+    
+    for i , j in enumerate(lista_atributos):
+        plt.figure(figsize=(10,7))
+        sns.histplot(data=df, y=lista_atributos[i])
+        plt.ylabel('Variables', fontsize=16)
+        plt.xlabel('Count', fontsize=16)
+        plt.show()
+    
+    
+    
+    # plt.figure(figsize=(15, 45))
+    # for i in enumerate(lista_atributos):
+    #     plt.subplot(12, 3, i[0]+1)
+    #     grafico = sns.barplot(x=i[1], y=i[1],
+    #                           data=df, estimator=lambda x: len(x) / len(df) * 100)
+    #     grafico.set(ylabel="Percent")
+
+
 
 
 
@@ -206,7 +241,7 @@ def analyse_plot_correlation_categorical_variables(df, lista_variaveis):
     Returns:
         resultant (DataFrame): Dataframe with all p-values
         
-        lista_resultado_analise (Array): array with Variable1 | Variable 2 | p-value
+        lista_resultado_analise (DataFrame):  with Variable1 | Variable 2 | p-value
     """
     resultant = pd.DataFrame(data=[(0 for i in range(len(lista_variaveis))) for i in range(len(lista_variaveis))],
                              columns=list(lista_variaveis), dtype=float)
@@ -231,8 +266,8 @@ def analyse_plot_correlation_categorical_variables(df, lista_variaveis):
     sns.heatmap(resultant, annot=True, cmap='Blues', fmt='.2f')
     plt.title('Resultados do teste Qui-quadrado (p-valor)')
     plt.show()
-
-    return resultant, lista_resultado_analise
+    df_lista_resultado_analise =  pd.DataFrame(lista_resultado_analise , columns=['Var 1' , 'Var 2' , 'p-value'])
+    return resultant, df_lista_resultado_analise
 
 
 def fill_categoric_field_with_value(serie, replace_nan):
@@ -240,7 +275,7 @@ def fill_categoric_field_with_value(serie, replace_nan):
 
     Parameters:
         serie (Series): data to be replace categorical with int
-        replace_nan (Boolean): flag to replace nan with N/A
+        replace_nan (Boolean): flag to replace nan with an index
         
     Returns:
         (Series): replaced values
@@ -248,14 +283,14 @@ def fill_categoric_field_with_value(serie, replace_nan):
     """
     names = serie.unique()
     values = list(range(1, names.size + 1))
-
-    # a tabela de valores continha um float(nan) mapeado para um valor inteiro. Solução foi mudar na tabela de valores colocando o None
-    nan_index = np.where(pd.isna(names))
-    if len(nan_index) > 0 and len(nan_index[0]) > 0:
-        nan_index = nan_index[0][0]
-        values[nan_index] = None
-    # else:
-        # print("Não encontrou nan em " + str(names))
+    if not replace_nan:
+        # a tabela de valores continha um float(nan) mapeado para um valor inteiro. Solução foi mudar na tabela de valores colocando o None
+        nan_index = np.where(pd.isna(names))
+        if len(nan_index) > 0 and len(nan_index[0]) > 0:
+            nan_index = nan_index[0][0]
+            values[nan_index] = None
+        # else:
+            # print("Não encontrou nan em " + str(names))
 
     return serie.replace(names, values)
 

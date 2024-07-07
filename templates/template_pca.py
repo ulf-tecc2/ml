@@ -1,6 +1,12 @@
 # -*- coding: utf-8 -*-
 
-# Análise Fatorial PCA
+
+"""Provide general template to use in Análise Fatorial PCA.
+
+@author: ulf Bergmann
+
+
+"""
 
 #%% Instalando os pacotes
 
@@ -39,18 +45,18 @@ def label_point(x, y, val, ax):
         ax.text(point['x'] + 0.05, point['y'], point['val'])
         
 def plot_loading(df , var_list):
-    """Plot loading factors.
-    
+    '''Plot loading factors.
     Parameters
     ----------
     df(DataFrame) : data to be ploted.
-    var_list(list) : variable column name in df
-
+    var_list(list) : variable column name in df.
+    
     Returns
     -------
-    (None)
+    None.
 
-    """
+    '''
+
     plt.figure(figsize=(12,8))
     df_chart = df.reset_index()
     plt.scatter(df_chart[var_list[0]], df_chart[var_list[1]], s=50, color='red')
@@ -76,6 +82,7 @@ def plot_loading(df , var_list):
 df = pd.read_excel("dados/notas_fatorial.xlsx")
 
 #%% Informações sobre as variáveis
+
 
 # Informações gerais sobre o DataFrame
 

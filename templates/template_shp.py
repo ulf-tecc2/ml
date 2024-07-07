@@ -1,8 +1,9 @@
 # -*- coding: utf-8 -*-
-"""
-Created on Mon Jun 24 13:47:06 2024
 
-@author: ulf
+"""Provide general template to use in Clusterization.
+
+@author: ulf Bergmann
+
 """
 #%% Instalando os pacotes
 

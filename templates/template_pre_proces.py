@@ -2,7 +2,29 @@
 
 """Provide a general template to use in ML data preparation.
 
-@author: ulf Bergmann
+##Processo Padrão:
+    
+###Informações iniciais - Estatística Descritiva.
+    
+###Ajuste Dos Tipos Das Variáveis.
+    
+###Tratamento De Valores Ausentes.
+    
+###Tratamento Das Variáveis Métricas.
+
+###Tratamento Das Variáveis Categóricas.
+
+###Verificar Se As Escalas Dos Valores São Similares E Padronizar Os Valores.
+
+###Eliminação De Variáveis / Redução De Dimensão.
+
+###Verificar o Vazamento De Informação (Data Leakage).
+
+###Eliminação De Variáveis Colineares (Alta Correlação).
+
+###Verificar possibilidade de utilizar Análise De Componentes Principais (PCA).
+
+@author: Ulf Bergmann
 
 """
 
@@ -32,7 +54,7 @@ warnings.filterwarnings("ignore")
 
 import sys
 
-sys.path.append("./lib")
+sys.path.append("./templates/lib")
 print(sys.path)
 
 import funcoes_ulf as ulfpp
@@ -42,43 +64,160 @@ np.random.seed(42)  # semente de aleatoriedade
 
 # para evitarmos a exibição dos dados em notacao científica
 pd.set_option('display.float_format', lambda x: '%.2f' % x)
+pd.set_option('display.max_columns', 20)
 
 #%%
-'''
-Leitura dos dados
-'''
+
 # =============================================================================
 # Leitura dos dados
 # =============================================================================
 
-# o conjunto de dados está no Google Drive, em um CSV separado por ;
-banco = pd.read_csv('https://drive.google.com/uc?export=download&id=1y6ESHpXVMd15a5aiJ4hVs412vmZmk_EV', sep = ';')
-#banco = pd.read_csv('C:/Users/ulf/OneDrive/Python/titanic/dados/train.csv')
-banco = pd.read_csv("https://drive.google.com/uc?export=download&id=1kErGPTcfCJotNKceFIDW0Q_qLgNJlGM8")
+# o conjunto de dados está no Google Drive, em um CSV separado por ,
+df = pd.read_csv('cases/titanic/dados/train.csv', sep = ',')
+
+
 #%%
 # =============================================================================
-# Informações iniciais 
+# Informações iniciais - Estatística Descritiva
 # =============================================================================
+
+
 print("************* ANÁLISE INICIAL ***********************\n" , )
 print("---- Exemplo dos dados -----")
-print(banco.head(10))
+print(df.head(10))
 
 print("\n---- Informações das variáveis -----")
-print(banco.info())
+print(df.info())
 
 print("\n---- Estatísticas Descritivas -----")
-print(banco.describe())
+print(df.describe())
 
-print("\n---- Valores null -----")
-print(banco.isnull().sum())
-
-
-#%%   ELIMINAÇÃO DE VARIÁVEIS / REDUÇÃO DE DIMENSÃO
 # =============================================================================
-# Preditores plausíveis:# Pré selecionar variáveis que sejam preditoras plausíveis (bom senso do pesquisador).
-# Coincidências acontecem em análises de big data e pode ser que o algoritmo dê muita importância para associações espúrias.
+# AJUSTE DOS TIPOS DAS VARIAVEIS
 # =============================================================================
 
+# banco['VAR'] = pd.to_datetime(banco['VAR_STR'])
+# banco['VAR'] = pd.to_numeric(banco['VAR_STR'], errors='coerce')
+
+# =============================================================================
+# TRATAMENTO DE VALORES AUSENTES
+# =============================================================================
+
+print("\n---- Valores null originais -----")
+print(df.isnull().sum())
+
+#preencher com o valor que mais aparece
+df['Embarked'].fillna((df['Embarked'].mode()[0]), inplace = True)
+
+#preencher com a media dos valores. Somente variaveis metricas
+#df['A'].fillna((df['A'].mean()), inplace = True)
+
+#extrair de informações de outras variáveis, p.ex., da média de cada honorifico em name
+def extract_honorific(name):
+    record = False
+    honorific = ''
+    for i, char in enumerate(name):
+        if char == ',':
+            record = True
+        if char == '.':
+            record = False
+        if record == True:
+            honorific += name[i + 2]
+    return honorific[:-1]
+
+def gerar_honorific_e_age_com_media(dados):
+    
+    #Finding the honorifics of all the passengers:
+    honorifics = [extract_honorific(name) for name in dados.Name]
+
+    #Creating a new "Honorific" column:
+    dados.insert(3 , "Honorific", honorifics)
+    
+    #COmpletar a idade com a média da idade de acordo com o honorifico que esta no meio do nome.
+
+    median_ages = pd.Series(dados.groupby(by = 'Honorific')['Age'].median())
+    median_ages.sort_values(ascending = False)
+    
+    for i, row in dados.iterrows():
+        
+        anAge = row['Age']
+        anHonorific = row['Honorific']
+        if  pd.isnull(anAge):
+            if anHonorific in median_ages:  
+                dados.at[i , 'Age'] = median_ages[anHonorific]
+    
+gerar_honorific_e_age_com_media(df)
+
+print("\n---- Valores null finais -----")
+print(df.isnull().sum())
+
+
+# =============================================================================
+# TRATAMENTO DAS VARIÁVEIS MÉTRICAS
+# =============================================================================
+
+df.info()
+
+lista_variáveis_metricas = ['Age','Fare']
+# lista_variáveis_metricas = list(banco.columns)
+
+
+# =============================================================================
+# TRATAMENTO DAS VARIÁVEIS CATEGÓRICAS
+# =============================================================================
+
+
+# Identificação das variáveis categoricas e metricas 
+a = ulfpp.search_for_categorical_variables(df)
+print(a)
+lista_variaveis_categoricas = ['Survived' , 'Pclass' , 'Sex' ,'SibSp' , 'Parch','Cabin', 'Embarked' ]
+
+# preencher categorias com um codigo inteiro para cada uma
+for i , j in enumerate(lista_variaveis_categoricas):
+    df[j] = ulfpp.fill_categoric_field_with_value(df[j] , True)
+
+
+
+# =============================================================================
+# # Verificar se as escalas dos valores são similares, ou seja, se não tem uma 
+#  que vá de -10 a 50 e outra de 0 a 100000. 
+#
+# Se forem discrepantes devemos padronizar os dados
+# MinMaxScaler => coloca os valores entre 0 e 1
+# StandardScaler (z-score ) => coloca os valores com média 0 e desvio  padrao 1
+# FunctionTransformer(np.log1p) => aplica a funcao Log(x) nos valores 
+# 
+# Min-max normalization is preferred when data doesn’t follow Gaussian or normal distribution. It’s favored for normalizing algorithms that don’t follow any distribution, such as KNN and neural networks. Note that normalization is affected by outliers.
+# Standardization can be helpful in cases where data follows a Gaussian distribution. However, this doesn’t necessarily have to be true. In addition, unlike normalization, standardization doesn’t have a bounding range. This means that even if there are outliers in data, they won’t be affected by standardization.
+# Log scaling is preferable if a dataset holds huge outliers.
+# =============================================================================
+
+#verificar as escalas das variaveis metricas
+ulfpp.plot_boxplot_for_variables(df , [lista_variáveis_metricas])
+
+from sklearn.preprocessing import StandardScaler
+
+sc = StandardScaler()
+
+sc.fit(df)
+
+sc.mean_
+
+sc.var_
+
+df_normalizado = pd.DataFrame(sc.transform(df) , columns=df.columns)
+
+df_normalizado.describe()
+
+
+# =============================================================================
+# ELIMINAÇÃO DE VARIÁVEIS / REDUÇÃO DE DIMENSÃO
+#
+# Preditores plausíveis:# Pré selecionar variáveis que sejam preditoras plausíveis
+#   (bom senso do pesquisador).
+# Coincidências acontecem em análises de big data e pode ser que o algoritmo 
+#   dê muita importância para associações espúrias.
+# =============================================================================
 
 # =============================================================================
 # Cuidado com vazamento de informação (data leakage)
@@ -94,16 +233,7 @@ print(banco.isnull().sum())
 # =============================================================================
 
 #variavel que eh id
-banco.drop(['PassengerId'] , inplace=True , axis=1)
-
-# Identificação das variáveis categoricas e metricas 
-a = ulfpp.search_for_categorical_variables(banco)
-print(a)
-lista_variaveis_categoricas = ['Survived' , 'Pclass' , 'Sex' ,'SibSp' , 'Parch','Embarked' ]
-
-banco.info()
-
-lista_variáveis_metricas = ['Age','Fare']
+df.drop(['PassengerId'] , inplace=True , axis=1)
 
 # =============================================================================
 # ELIMINAÇÃO DE VARIÁVEIS COLINEARES (ALTA CORRELAÇÃO)
@@ -111,27 +241,30 @@ lista_variáveis_metricas = ['Age','Fare']
 # Estabelecer um limite de correlação com alguma outra variável (0,75 a 0,90).
 # =============================================================================
 
-#%%
-lista_variáveis_metricas = list(banco.columns)
-lista_variáveis_metricas.remove('VERDATE')
 
-lista_maiores_correlacoes_continuas , corr_matrix = ulfpp.analyse_correlation_continuos_variables(banco , lista_variáveis_metricas , 10)
+lista_maiores_correlacoes_continuas , corr_matrix = ulfpp.analyse_correlation_continuos_variables(df , lista_variáveis_metricas , 10)
 
-ulfpp.plot_correlation_heatmap(banco , lista_variáveis_metricas)
-
+ulfpp.plot_correlation_heatmap(df , lista_variáveis_metricas)
 print("\n Correlaçoes das Variaveis Continuas")
 print(lista_maiores_correlacoes_continuas)
 
-lista_maiores_correlacoes_categoricas = ulfpp.analyse_plot_correlation_categorical_variables (banco , lista_variaveis_categoricas)
+#%%
+df_p_value , maiores_correlacoes_categoricas = ulfpp.analyse_plot_correlation_categorical_variables (df , lista_variaveis_categoricas)
 print("\n Correlaçoes das Variaveis Categoricas")
-print(lista_maiores_correlacoes_continuas)
+print(maiores_correlacoes_categoricas)
+
+
 #%%
 
 
 
+# =============================================================================
 # Análise de Componentes Principais. Técnica de aprendizado não supervisionado. 
-# O objetivo é encontrar ombinações lineares das variáveis preditoras que incluam a maior quantidade
+# O objetivo é encontrar combinações lineares das variáveis preditoras que incluam a maior quantidade
 # possível da variância original. Cria componentes principais não correlacionados.
+# 
+# Ver template_pca.py
+# =============================================================================
 
 
 
@@ -145,55 +278,9 @@ print(lista_maiores_correlacoes_continuas)
 # Exemplo, munícipios com baixa população e que provavelmente as amostras utilizadas sejam pequenas
 # 
 # =============================================================================
-banco_filtrado = banco[banco['PopResid'] > 10000]
-ulfpp.plot_frequencias_valores_atributos(banco_filtrado , ['PopResid'] )
-banco_filtrado.describe().T
+df_filtrado = df[df['PopResid'] > 10000]
+
+ulfpp.plot_frequencias_valores_atributos(df_filtrado , ['PopResid'] )
+df_filtrado.describe().T
 
 
-#%% Separar dados de treino e teste
-
-#variavel a ser predita
-outcome = banco_filtrado['ExpecVida']
-
-#Eliminar variáveis que
-banco_filtrado.drop(['ExpecVida' , 'cod_municipio'] , axis=1 , inplace=True)
-
-# fazemos a separação do conjunto de dados em treino/teste, com 30% dos dados para teste
-X_train, X_test, y_train, y_test = train_test_split(banco_filtrado, outcome, test_size=0.3)
-
-#%%
-# =============================================================================
-# # Verificar se as escalas dos valores são similares, ou seja, se não tem uma que vá de -10 a 50 e outra de 0 a 100000. 
-#
-# # Se forem discrepantes devemos padronizar os dados
-# # MinMaxScaler => coloca os valores entre 0 e 1
-# # StandardScaler (z-score ) => coloca os valores com média 0 e desvio  padrao 1
-# # FunctionTransformer(np.log1p) => aplica a funcao Log(x) nos valores 
-# 
-# Min-max normalization is preferred when data doesn’t follow Gaussian or normal distribution. It’s favored for normalizing algorithms that don’t follow any distribution, such as KNN and neural networks. Note that normalization is affected by outliers.
-# 
-# Standardization can be helpful in cases where data follows a Gaussian distribution. However, this doesn’t necessarily have to be true. In addition, unlike normalization, standardization doesn’t have a bounding range. This means that even if there are outliers in data, they won’t be affected by standardization.
-# 
-# Log scaling is preferable if a dataset holds huge outliers.
-# =============================================================================
-
-from sklearn.preprocessing import StandardScaler
-
-sc = StandardScaler()
-
-sc.fit(X_train)
-
-sc.mean_
-
-sc.var_
-
-X_train = pd.DataFrame(sc.transform(X_train) , columns=X_train.columns)
-
-X_train.describe()
-
-X_test = pd.DataFrame(sc.transform(X_test) , columns=X_test.columns)
-X_test.describe()
-
-a = ulfpp.search_for_categorical_variables(banco)
-
-print(a)

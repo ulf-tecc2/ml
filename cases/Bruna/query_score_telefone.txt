@@ -1,0 +1,719 @@
+WITH WA_RAW AS (
+	SELECT ct.id_principal_interacao,
+		ct.dt_ini_interacao,
+		CAST(
+			regexp_replace(ct.numero_ec, '[^0-9]+', '') as bigint
+		) as NU_SO_EC,
+		regexp_replace(ct.de, '[^0-9]+', '') AS tel_orig,
+		CASE
+			WHEN LENGTH(regexp_replace(ct.de, '[^0-9]+', '')) = 12
+			AND SUBSTRING(regexp_replace(ct.de, '[^0-9]+', ''), 5, 1) in ('9', '8', '7', '6')
+			AND SUBSTRING(regexp_replace(ct.de, '[^0-9]+', ''), 1, 2) = '55' -- Adicionados filtros para apenas inserir o 9 em telefones celulares
+			THEN CONCAT(
+				CONCAT(
+					SUBSTRING(regexp_replace(ct.de, '[^0-9]+', ''), 1, 4),
+					'9'
+				),
+				SUBSTRING(regexp_replace(ct.de, '[^0-9]+', ''), 5, 8)
+			) ELSE regexp_replace(ct.de, '[^0-9]+', '')
+		END AS tel_completo,
+		ct.place,
+		ct.aplicacao
+	FROM e_infomart.tbciar_tr_infomart_interacoes_wa ct
+	where ct.dt_prtc >= 20230101
+		and ct.aplicacao <> 'Courier' -- remocao de interacoes relacionadas ao bot courier
+		and ct.place not like '%BOT_COURIER%' -- remocao de interacoes relacionadas ao bot courier
+		and ct.numero_ec <> 'Sem_identificacao'
+		and ct.numero_ec not like '%fake%'
+		and ct.numero_ec is not null
+		and ct.numero_ec <> '0'
+		and CAST(
+			regexp_replace(ct.numero_ec, '[^0-9]+', '') as bigint
+		) is not null
+		and regexp_replace(ct.de, '[^0-9]+', '') is not null
+		and regexp_replace(ct.de, '[^0-9]+', '') <> ''
+),
+CONT_WA_RAW AS (
+	SELECT TEL_COMPLETO,
+		COUNT(NU_SO_EC) AS TOTAL_ECS
+	FROM (
+			SELECT NU_SO_EC,
+				TEL_COMPLETO,
+				COUNT(1) AS TOTAL
+			FROM WA_RAW
+			GROUP BY NU_SO_EC,
+				TEL_COMPLETO
+		)
+	GROUP BY TEL_COMPLETO
+	HAVING COUNT(NU_SO_EC) <= 3
+),
+COURIER_WA_RAW AS (
+	SELECT distinct CASE
+			WHEN LENGTH(regexp_replace(ct.de, '[^0-9]+', '')) = 12
+			AND SUBSTRING(regexp_replace(ct.de, '[^0-9]+', ''), 5, 1) in ('9', '8', '7', '6')
+			AND SUBSTRING(regexp_replace(ct.de, '[^0-9]+', ''), 1, 2) = '55' THEN CONCAT(
+				CONCAT(
+					SUBSTRING(regexp_replace(ct.de, '[^0-9]+', ''), 1, 4),
+					'9'
+				),
+				SUBSTRING(regexp_replace(ct.de, '[^0-9]+', ''), 5, 8)
+			) ELSE regexp_replace(ct.de, '[^0-9]+', '')
+		END as tel_courier
+	FROM e_infomart.tbciar_tr_infomart_interacoes_wa ct
+	where ct.dt_prtc >= 20230101
+		and ct.aplicacao = 'Courier'
+		or ct.place like '%BOT_COURIER%'
+),
+WA AS (
+	SELECT NU_SO_EC,
+		WA_RAW.tel_completo,
+		max(dt_ini_interacao) as ultima_interacao,
+		count(distinct id_principal_interacao) as qtd_interacao
+	FROM WA_RAW
+		INNER JOIN CONT_WA_RAW ON WA_RAW.TEL_COMPLETO = CONT_WA_RAW.TEL_COMPLETO
+		LEFT JOIN COURIER_WA_RAW ON WA_RAW.TEL_COMPLETO = COURIER_WA_RAW.tel_courier
+	WHERE COURIER_WA_RAW.tel_courier IS NULL -- REMOCAO DE QUALQUER TELEFONE DE COURIER
+	group by 1,
+		2
+	order by max(dt_ini_interacao) asc,
+		count(dt_ini_interacao) desc
+),
+TEL_GNS as (
+	select case
+			when length(tlfn_gn) = 8
+			and substr(tlfn_gn, 1, 1) in ('6', '7', '8', '9') then concat('55', ddd_gn, '9', tlfn_gn) else concat('55', ddd_gn, tlfn_gn)
+		end as tlfn_gn_cplt
+	from u_logistica.tbciar_tr_tlfn_gn_rsto
+    where dt_crga = (select max(dt_crga) from u_logistica.tbciar_tr_tlfn_gn_rsto) 
+),
+TEL_RSTO as (
+	select tlfn_rsto
+	from u_logistica.tbciar_tr_tlfn_lsta_rsto
+    where dt_crga = (select max(dt_crga) from u_logistica.tbciar_tr_tlfn_lsta_rsto) 
+),
+WA_SEM_GNS as (
+	select WA.*
+	from WA
+		left join TEL_RSTO t2 on WA.tel_completo = t2.tlfn_rsto
+		left join TEL_GNS t3 on WA.tel_completo = t3.tlfn_gn_cplt
+	where 
+        (length(tel_completo) = 13
+		or length(tel_completo) = 12)
+		and substr(tel_completo, 1, 2) = '55'
+		and t2.tlfn_rsto is null
+		and t3.tlfn_gn_cplt is null
+),
+WA_RNK as (
+	select WA_SEM_GNS.*,
+		row_number() over (
+			partition by nu_so_ec
+			order by ultima_interacao desc
+		) as rnk
+	from WA_SEM_GNS
+),
+WA_RNK_FILTRADO as (
+	select nu_so_ec,
+		max(tel_completo) as tel_completo,
+		ultima_interacao,
+		max(qtd_interacao) as qtd_interacoes
+	from WA_RNK
+	where rnk = 1
+	group by nu_so_ec,
+		ultima_interacao
+),
+GTEC as (
+	select distinct CAST(nu_estab as bigint) as nu_so_ec,
+		nu_ddd as ddd_gtec,
+		case
+			when length(nu_fone) = 8 then concat('9', nu_fone) else nu_fone
+		end as tel_gtec,
+		max(gt.dh_abrt_chmd) as ultima_interacao,
+		count(distinct gt.nu_chmd) as qtd_interacao
+	from gtec.tbciar_tr_hstr_endr_gtec ende
+		inner join sie.tbdwr_chmd_gtec_2 gt on ende.nu_chamado = gt.nu_chmd
+		and gt.nu_sqnc_chmd = 0
+	where substr(nu_fone, 1, 1) in ('6', '7', '8', '9')
+		and ende.nu_ddd <> 'nan'
+		and ende.nu_fone <> 'nan'
+	group by 1,
+		2,
+		3
+),
+GTEC_TEL_COMPLETO as (
+	select GTEC.*,
+		concat(CONCAT('55', DDD_GTEC), TEL_GTEC) AS TEL_COMPLETO_GTEC
+	FROM GTEC
+),
+GTEC_SEM_GNS AS (
+	SELECT GTEC_TEL_COMPLETO.*
+	FROM GTEC_TEL_COMPLETO
+		left join TEL_RSTO t2 on GTEC_TEL_COMPLETO.TEL_COMPLETO_GTEC = t2.tlfn_rsto
+		left join TEL_GNS t3 on GTEC_TEL_COMPLETO.TEL_COMPLETO_GTEC = t3.tlfn_gn_cplt
+	where 
+        (length(TEL_COMPLETO_GTEC) = 13
+		or length(TEL_COMPLETO_GTEC) = 12)
+		and substr(TEL_COMPLETO_GTEC, 1, 2) = '55'
+		and t2.tlfn_rsto is null
+		and t3.tlfn_gn_cplt is null
+),
+GTEC_RNK AS (
+	SELECT GTEC_SEM_GNS.*,
+		ROW_NUMBER() OVER (
+			PARTITION BY NU_SO_EC
+			ORDER BY ultima_interacao DESC
+		) AS RNK
+	FROM GTEC_SEM_GNS
+),
+GTEC_RNK_FILTRADO AS (
+	SELECT NU_SO_EC,
+		max(TEL_COMPLETO_GTEC) AS TEL_COMPLETO_GTEC,
+		ultima_interacao,
+		max(qtd_interacao) as qtd_interacoes
+	FROM GTEC_RNK
+	WHERE RNK = 1
+	GROUP BY NU_SO_EC,
+		ultima_interacao
+),
+URA_RAW as (
+	SELECT CAST(regexp_replace(ura.ec, '[^0-9]+', '') as bigint) as NU_SO_EC,
+		CASE
+			WHEN LENGTH(regexp_replace(ura.ani, '[^0-9]+', '')) = 10 THEN CONCAT(
+				'55',
+				SUBSTRING(regexp_replace(ura.ani, '[^0-9]+', ''), 1, 2),
+				'9',
+				SUBSTRING(regexp_replace(ura.ani, '[^0-9]+', ''), 3, 8)
+			) ELSE concat('55', regexp_replace(ura.ani, '[^0-9]+', ''))
+		END AS TEL_COMPLETO,
+		cast(unix_timestamp(inicio_ura, 'dd/MM/yyyy HH:mm:ss') as timestamp) as inicio_ura,
+		ura.interaction_id
+	FROM e_infomart.tbciar_infomart_ura_detalhada ura
+	where ura.dt_particao >= 20230101
+		and ura.ec <> 'Sem_identificacao'
+		and ura.ec <> '0'
+		and ura.ec not like '%null%'
+		and ura.ec not like '%fake%'
+		and CAST(regexp_replace(ura.ec, '[^0-9]+', '') as bigint) is not null
+		and substring(regexp_replace(ura.ani, '[^0-9]+', ''), 3, 1) in ('6', '7', '8', '9')
+		and ura.aplicacao_ura not like '%Courier%' -- remocao de telefones de courier
+),
+URA AS (
+	select NU_SO_EC,
+		TEL_COMPLETO,
+		max(inicio_ura) as ultima_interacao,
+		count(distinct interaction_id) as qtd_interacao
+	from URA_RAW
+	group by NU_SO_EC,
+		TEL_COMPLETO
+	order by ULTIMA_INTERACAO asc,
+		qtd_interacao desc
+),
+URA_SEM_GNS as (
+	select URA.*
+	from URA
+		left join TEL_RSTO t2 on URA.tel_completo = t2.tlfn_rsto
+		left join TEL_GNS t3 on URA.tel_completo = t3.tlfn_gn_cplt
+	where 
+        (length(tel_completo) = 13
+		or length(tel_completo) = 12)
+		and substr(tel_completo, 1, 2) = '55'
+		and t2.tlfn_rsto is null
+		and t3.tlfn_gn_cplt is null
+),
+URA_RNK as (
+	select URA_SEM_GNS.*,
+		row_number() over (
+			partition by nu_so_ec
+			order by ultima_interacao desc
+		) as rnk
+	from URA_SEM_GNS
+),
+URA_RNK_FILTRADO as (
+	select nu_so_ec,
+		max(tel_completo) as tel_completo,
+		ultima_interacao,
+		max(qtd_interacao) as qtd_interacoes
+	from URA_RNK
+	where rnk = 1
+	group by nu_so_ec,
+		ultima_interacao
+),
+VOZ_RAW AS (
+	SELECT CAST(
+			regexp_replace(ura.nu_so_ec, '[^0-9]+', '') as bigint
+		) AS NU_SO_EC,
+		CASE
+			WHEN LENGTH(regexp_replace(ura.de, '[^0-9]+', '')) = 10 THEN CONCAT(
+				'55',
+				SUBSTRING(regexp_replace(ura.de, '[^0-9]+', ''), 1, 2),
+				'9',
+				SUBSTRING(regexp_replace(ura.de, '[^0-9]+', ''), 3, 8)
+			) ELSE concat('55', regexp_replace(ura.de, '[^0-9]+', ''))
+		END AS TEL_COMPLETO,
+		ura.horario_inicial_interacao,
+		ura.id_principal_da_interacao
+	FROM e_infomart.tbciar_infomart_interacoes ura
+	where ura.data_inicial_interacao >= 20230101
+		and ura.tipo_de_midia = 'Voice'
+		and ura.nu_so_ec <> 'Sem_identificacao'
+		and ura.nu_so_ec not like '%null%'
+		and ura.nu_so_ec not like '%fake%'
+		and ura.nu_so_ec is not null
+		and ura.nu_so_ec <> '0'
+		and CAST(
+			regexp_replace(ura.nu_so_ec, '[^0-9]+', '') as bigint
+		) is not null
+		and regexp_replace(ura.de, '[^0-9]+', '') is not null
+		and regexp_replace(ura.de, '[^0-9]+', '') <> ''
+		and substring(regexp_replace(ura.de, '[^0-9]+', ''), 3, 1) in ('6', '7', '8', '9')
+		and ura.aplicacao_de_ura not like '%Courier%' -- remocao de telefones de courier
+),
+VOZ as (
+	SELECT NU_SO_EC,
+		TEL_COMPLETO,
+		max(horario_inicial_interacao) as ULTIMA_INTERACAO,
+		count(distinct id_principal_da_interacao) as qtd_interacao
+	FROM VOZ_RAW
+	group by NU_SO_EC,
+		TEL_COMPLETO
+	order by ULTIMA_INTERACAO asc,
+		qtd_interacao desc
+),
+VOZ_SEM_GNS as (
+	select VOZ.*
+	from VOZ
+		left join TEL_RSTO t2 on VOZ.tel_completo = t2.tlfn_rsto
+		left join TEL_GNS t3 on VOZ.tel_completo = t3.tlfn_gn_cplt
+	where 
+        (length(tel_completo) = 13
+		or length(tel_completo) = 12)
+		and substr(tel_completo, 1, 2) = '55'
+		and t2.tlfn_rsto is null
+		and t3.tlfn_gn_cplt is null
+),
+VOZ_RNK as (
+	select VOZ_SEM_GNS.*,
+		row_number() over (
+			partition by nu_so_ec
+			order by ultima_interacao desc
+		) as rnk
+	from VOZ_SEM_GNS
+),
+VOZ_RNK_FILTRADO as (
+	select nu_so_ec,
+		max(tel_completo) as tel_completo,
+		ultima_interacao,
+		max(qtd_interacao) as qtd_interacoes
+	from VOZ_RNK
+	where rnk = 1
+	group by nu_so_ec,
+		ultima_interacao
+),
+CPC AS (
+	SELECT T1.*
+	FROM (
+			SELECT NU_SO_EC,
+				CASE
+					WHEN LENGTH(CAST(TEL1 AS string)) = 8 THEN CONCAT(
+						'55',
+						CAST(DDD1 AS string),
+						'9',
+						CAST(TEL1 AS string)
+					) ELSE CONCAT(
+						'55',
+						CAST(DDD1 AS string),
+						CAST(TEL1 AS string)
+					)
+				END AS TEL_CPC
+			FROM gcm.tbgcmr_celular_priorizados
+			WHERE SUBSTR(CAST(TEL1 AS string), 1, 1) IN ('6', '7', '8', '9')
+		) T1
+		left join TEL_RSTO t2 on tel_cpc = t2.tlfn_rsto
+		left join TEL_GNS t3 on tel_cpc = t3.tlfn_gn_cplt
+	WHERE t2.tlfn_rsto IS NULL -- REMOVER TELEFONES DA LISTA RESTRITA
+		and t3.tlfn_gn_cplt IS NULL -- REMOVER TELEFONES QUE SAO DOS GNS
+		AND LENGTH (TEL_CPC) = 13 -- MANTER APENAS TELEFONES PADRONIZADOS
+),
+BASE_TEL AS (
+	SELECT COALESCE (NU_SO_EC_T2, VOZ_RNK_FILTRADO.NU_SO_EC) AS NU_SO_EC,
+		TEL_WA,
+		ULTIMA_INTERACAO_WA,
+		QTD_INTERACOES_WA,
+		TEL_GTEC,
+		ULTIMA_INTERACAO_GTEC,
+		QTD_INTERACOES_GTEC,
+		TEL_URA,
+		ULTIMA_INTERACAO_URA,
+		QTD_INTERACOES_URA,
+		VOZ_RNK_FILTRADO.TEL_COMPLETO AS TEL_VOZ,
+		VOZ_RNK_FILTRADO.ultima_interacao AS ULTIMA_INTERACAO_VOZ,
+		VOZ_RNK_FILTRADO.QTD_INTERACOES AS QTD_INTERACOES_VOZ
+	FROM (
+			SELECT COALESCE (NU_SO_EC_T1, URA_RNK_FILTRADO.NU_SO_EC) AS NU_SO_EC_T2,
+				TEL_WA,
+				ULTIMA_INTERACAO_WA,
+				QTD_INTERACOES_WA,
+				TEL_GTEC,
+				ULTIMA_INTERACAO_GTEC,
+				QTD_INTERACOES_GTEC,
+				URA_RNK_FILTRADO.NU_SO_EC AS NU_SO_EC_URA,
+				URA_RNK_FILTRADO.TEL_COMPLETO AS TEL_URA,
+				URA_RNK_FILTRADO.ultima_interacao AS ULTIMA_INTERACAO_URA,
+				URA_RNK_FILTRADO.QTD_INTERACOES AS QTD_INTERACOES_URA
+			FROM (
+					SELECT COALESCE (
+							WA_RNK_FILTRADO.NU_SO_EC,
+							GTEC_RNK_FILTRADO.NU_SO_EC
+						) AS NU_SO_EC_T1,
+						WA_RNK_FILTRADO.TEL_COMPLETO AS TEL_WA,
+						WA_RNK_FILTRADO.ULTIMA_INTERACAO AS ULTIMA_INTERACAO_WA,
+						WA_RNK_FILTRADO.QTD_INTERACOES AS QTD_INTERACOES_WA,
+						GTEC_RNK_FILTRADO.TEL_COMPLETO_GTEC AS TEL_GTEC,
+						GTEC_RNK_FILTRADO.ULTIMA_INTERACAO AS ULTIMA_INTERACAO_GTEC,
+						GTEC_RNK_FILTRADO.QTD_INTERACOES AS QTD_INTERACOES_GTEC
+					FROM WA_RNK_FILTRADO
+						FULL OUTER JOIN GTEC_RNK_FILTRADO ON WA_RNK_FILTRADO.NU_SO_EC = GTEC_RNK_FILTRADO.NU_SO_EC
+				) T1
+				FULL OUTER JOIN URA_RNK_FILTRADO ON T1.NU_SO_EC_T1 = URA_RNK_FILTRADO.NU_SO_EC
+		) T2
+		FULL OUTER JOIN VOZ_RNK_FILTRADO ON T2.NU_SO_EC_T2 = VOZ_RNK_FILTRADO.NU_SO_EC
+),
+BASE_TEL_COM_CPC AS (
+	SELECT T1.*,
+		T2.TEL_CPC
+	FROM BASE_TEL T1
+		LEFT JOIN CPC T2 ON T1.NU_SO_EC = T2.NU_SO_EC
+),
+CONTATO_STAR AS (
+	select distinct nu_customer,
+		CASE
+			WHEN LENGTH(PC.nu_phone) = 8 THEN CONCAT(
+				PC.nu_ddi_phone,
+				PC.NU_DDD_PHONE,
+				'9',
+				PC.NU_PHONE
+			) ELSE CONCAT(PC.nu_ddi_phone, PC.NU_DDD_PHONE, PC.NU_PHONE)
+		END AS TEL_COMPLETO_STAR
+	FROM STAR.TBHRQR_MERCHANT_NODE NODE
+		INNER JOIN STAR.TBCTMR_CONTACT_REL_HIERARCHY CRH ON (
+			NODE.NU_HIERARCHICAL_NODE = CRH.nu_hierarchical_node
+		)
+		INNER JOIN STAR.TBCTMR_PHONE_CONTACT PC ON (
+			CRH.NU_CONTACT = PC.NU_CONTACT
+			AND CD_PHONE_TYPE IN (1, 2, 4)
+		)
+	WHERE 1 = 1
+		AND SUBSTRING(PC.NU_PHONE, 1, 1) IN ('6', '7', '8', '9')
+),
+PROP_STAR AS (
+	SELECT DISTINCT PRC.NU_CUSTOMER,
+		CASE
+			WHEN LENGTH(P.nu_phone) = 8 THEN CONCAT(P.nu_ddi_phone, P.NU_DDD_PHONE, '9', P.NU_PHONE) ELSE CONCAT(
+				P.nu_ddi_phone,
+				P.NU_DDD_PHONE,
+				P.NU_PHONE
+			)
+		END AS TEL_COMPLETO_STAR
+	FROM STAR.TBCTMR_PERSON_REL_CUSTOMER PRC
+		INNER JOIN STAR.TBCTMR_NATURAL_PERSON NP ON PRC.NU_NATURAL_PERSON = NP.NU_NATURAL_PERSON
+		INNER JOIN STAR.TBCTMR_PHONE P ON P.NU_NATURAL_PERSON = PRC.NU_NATURAL_PERSON
+		AND P.NU_CUSTOMER = PRC.NU_CUSTOMER
+	WHERE SUBSTRING(P.NU_PHONE, 1, 1) IN ('6', '7', '8', '9')
+),
+BASE_TEL_CONSOLIDADA AS (
+	SELECT NU_SO_EC,
+		TEL_WA,
+		ULTIMA_INTERACAO_WA,
+		QTD_INTERACOES_WA,
+		TEL_GTEC,
+		ULTIMA_INTERACAO_GTEC,
+		QTD_INTERACOES_GTEC,
+		TEL_URA,
+		ULTIMA_INTERACAO_URA,
+		QTD_INTERACOES_URA,
+		TEL_VOZ,
+		ULTIMA_INTERACAO_VOZ,
+		QTD_INTERACOES_VOZ,
+		TEL_CPC,
+		-- AVALIACAO DO CADASTRO DOS CONTATOS/PROPRIETARIOS DOS ECS DO STAR
+		CASE
+			WHEN TEL_WA IS NOT NULL
+			AND T2_WA.TEL_COMPLETO_STAR IS NOT NULL THEN 'PROPRIETARIO'
+			WHEN TEL_WA IS NOT NULL
+			AND T6_WA.TEL_COMPLETO_STAR IS NOT NULL THEN 'CONTATO'
+			WHEN TEL_WA IS NULL THEN '-' ELSE 'SEM CADASTRO'
+		END CADASTRO_TEL_WA,
+		CASE
+			WHEN TEL_GTEC IS NOT NULL
+			AND T3_GTEC.TEL_COMPLETO_STAR IS NOT NULL THEN 'PROPRIETARIO'
+			WHEN TEL_GTEC IS NOT NULL
+			AND T7_GTEC.TEL_COMPLETO_STAR IS NOT NULL THEN 'CONTATO'
+			WHEN TEL_GTEC IS NULL THEN '-' ELSE 'SEM CADASTRO'
+		END CADASTRO_TEL_GTEC,
+		CASE
+			WHEN TEL_URA IS NOT NULL
+			AND T4_URA.TEL_COMPLETO_STAR IS NOT NULL THEN 'PROPRIETARIO'
+			WHEN TEL_URA IS NOT NULL
+			AND T8_URA.TEL_COMPLETO_STAR IS NOT NULL THEN 'CONTATO'
+			WHEN TEL_URA IS NULL THEN '-' ELSE 'SEM CADASTRO'
+		END CADASTRO_TEL_URA,
+		CASE
+			WHEN TEL_VOZ IS NOT NULL
+			AND T5_VOZ.TEL_COMPLETO_STAR IS NOT NULL THEN 'PROPRIETARIO'
+			WHEN TEL_VOZ IS NOT NULL
+			AND T9_VOZ.TEL_COMPLETO_STAR IS NOT NULL THEN 'CONTATO'
+			WHEN TEL_VOZ IS NULL THEN '-' ELSE 'SEM CADASTRO'
+		END CADASTRO_TEL_VOZ
+	FROM BASE_TEL_COM_CPC T1 -- JOINS COM TABELA DE CONTATO DOS PROPRIETARIOS DOS ECS DO STAR
+		LEFT JOIN PROP_STAR T2_WA ON T1.NU_SO_EC = CAST(T2_WA.NU_CUSTOMER AS bigint)
+		AND T1.TEL_WA = T2_WA.TEL_COMPLETO_STAR
+		LEFT JOIN PROP_STAR T3_GTEC ON T1.NU_SO_EC = CAST(T3_GTEC.NU_CUSTOMER AS bigint)
+		AND T1.TEL_GTEC = T3_GTEC.TEL_COMPLETO_STAR
+		LEFT JOIN PROP_STAR T4_URA ON T1.NU_SO_EC = CAST(T4_URA.NU_CUSTOMER AS bigint)
+		AND T1.TEL_GTEC = T4_URA.TEL_COMPLETO_STAR
+		LEFT JOIN PROP_STAR T5_VOZ ON T1.NU_SO_EC = CAST(T5_VOZ.NU_CUSTOMER AS bigint)
+		AND T1.TEL_GTEC = T5_VOZ.TEL_COMPLETO_STAR -- JOINS COM TABELA DE CONTATO DOS ECS DO STAR
+		LEFT JOIN CONTATO_STAR T6_WA ON T1.NU_SO_EC = CAST(T6_WA.NU_CUSTOMER AS bigint)
+		AND T1.TEL_WA = T6_WA.TEL_COMPLETO_STAR
+		LEFT JOIN CONTATO_STAR T7_GTEC ON T1.NU_SO_EC = CAST(T7_GTEC.NU_CUSTOMER AS bigint)
+		AND T1.TEL_GTEC = T7_GTEC.TEL_COMPLETO_STAR
+		LEFT JOIN CONTATO_STAR T8_URA ON T1.NU_SO_EC = CAST(T8_URA.NU_CUSTOMER AS bigint)
+		AND T1.TEL_GTEC = T8_URA.TEL_COMPLETO_STAR
+		LEFT JOIN CONTATO_STAR T9_VOZ ON T1.NU_SO_EC = CAST(T9_VOZ.NU_CUSTOMER AS bigint)
+		AND T1.TEL_GTEC = T9_VOZ.TEL_COMPLETO_STAR
+),
+COMP_FLAG AS (
+	SELECT T5.*,
+		CASE
+			WHEN ST_PROP.TEL_COMPLETO_STAR IS NOT NULL THEN 'PROPRIETARIO'
+			WHEN ST_CONTATO.TEL_COMPLETO_STAR IS NOT NULL THEN 'CONTATO' ELSE 'SEM CADASTRO'
+		END CADASTRO_TEL_PRIORIZADO,
+		case
+			when cd_situ_ativ_ec = 3 then 1 else 0
+		end as FLAG_EC_ATIVO
+	FROM (
+			SELECT T4.*,
+				CASE
+					WHEN SCORE_TEL_EC = '1-DIAMANTE' THEN TEL_WA
+					WHEN SCORE_TEL_EC = '2-OURO' THEN TEL_WA
+					WHEN SCORE_TEL_EC = '3-PRATA' THEN TEL_WA
+					WHEN SCORE_TEL_EC = '4-BRONZE' THEN TEL_GTEC
+					WHEN SCORE_TEL_EC = '5-LATAO'
+					AND FLAG_GTEC = 1 THEN TEL_GTEC
+					WHEN SCORE_TEL_EC = '5-LATAO'
+					AND FLAG_VOZ = 1 THEN TEL_VOZ
+					WHEN SCORE_TEL_EC = '5-LATAO'
+					AND FLAG_URA = 1 THEN TEL_URA ELSE 'SEM TEL'
+				END TEL_PRIORIZADO
+			FROM (
+					SELECT T3.*,
+						CASE
+							WHEN (
+								TEL_CPC = TEL_WA
+								AND WA_IGUAL_GTEC = 1
+								AND (
+									WA_IGUAL_VOZ = 1
+									OR FLAG_VOZ = 0
+								)
+								AND (
+									WA_IGUAL_URA = 1
+									OR FLAG_URA = 0
+								)
+							) THEN '1-DIAMANTE'
+							WHEN (
+								(
+									TEL_CPC = TEL_WA
+									AND WA_IGUAL_GTEC = 1
+									AND WA_IGUAL_VOZ = 1
+									AND TEL_CPC <> TEL_URA
+								)
+								OR (
+									TEL_CPC = TEL_WA
+									AND WA_IGUAL_GTEC = 1
+									AND TEL_WA <> TEL_VOZ
+									AND (
+										TEL_WA = TEL_URA
+										OR TEL_WA <> TEL_URA
+										OR FLAG_URA = 0
+									)
+								)
+								OR (
+									TEL_CPC = TEL_WA
+									AND WA_IGUAL_GTEC = 1
+									AND FLAG_VOZ = 0
+									AND TEL_WA <> TEL_URA
+								)
+								OR (
+									FLAG_GTEC = 0
+									AND TEL_CPC = TEL_WA
+								)
+								OR (
+									TEL_CPC <> TEL_GTEC
+									AND TEL_CPC = TEL_WA
+								)
+							) THEN '2-OURO'
+							WHEN FLAG_WA = 1 THEN '3-PRATA'
+							WHEN TEL_CPC = TEL_GTEC THEN '4-BRONZE'
+							WHEN FLAG_GTEC = 0
+							OR FLAG_GTEC = 1 THEN '5-LATAO' ELSE '6-OUTROS'
+						END SCORE_TEL_EC
+					FROM (
+							SELECT T2.*,
+								CASE
+									WHEN FLAG_WA = 1
+									AND FLAG_GTEC = 1
+									AND FLAG_URA = 1
+									AND FLAG_VOZ = 1
+									AND TEL_WA = TEL_GTEC
+									AND TEL_WA = TEL_URA
+									AND TEL_WA = TEL_VOZ THEN 1 ELSE 0
+								END AS WA_igual_GTEC_igual_URA_igual_VOZ,
+								CASE
+									WHEN FLAG_WA = 1
+									AND FLAG_GTEC = 1
+									AND FLAG_VOZ = 1
+									AND TEL_WA = TEL_GTEC
+									AND TEL_WA = TEL_VOZ THEN 1 ELSE 0
+								END AS WA_igual_GTEC_igual_VOZ,
+								CASE
+									WHEN FLAG_WA = 1
+									AND FLAG_GTEC = 1
+									AND FLAG_URA = 1
+									AND TEL_WA = TEL_GTEC
+									AND TEL_WA = TEL_URA THEN 1 ELSE 0
+								END AS WA_igual_GTEC_igual_URA,
+								CASE
+									WHEN FLAG_WA = 1
+									AND FLAG_GTEC = 1
+									AND TEL_WA = TEL_GTEC THEN 1 ELSE 0
+								END AS WA_igual_GTEC,
+								CASE
+									WHEN FLAG_WA = 1
+									AND FLAG_URA = 1
+									AND TEL_WA = TEL_URA THEN 1 ELSE 0
+								END AS WA_igual_URA,
+								CASE
+									WHEN FLAG_WA = 1
+									AND FLAG_VOZ = 1
+									AND TEL_WA = TEL_VOZ THEN 1 ELSE 0
+								END AS WA_igual_VOZ,
+								CASE
+									WHEN FLAG_GTEC = 1
+									AND FLAG_URA = 1
+									AND TEL_GTEC = TEL_URA THEN 1 ELSE 0
+								END AS GTEC_igual_URA,
+								CASE
+									WHEN FLAG_GTEC = 1
+									AND FLAG_VOZ = 1
+									AND TEL_GTEC = TEL_VOZ THEN 1 ELSE 0
+								END AS GTEC_igual_VOZ,
+								CASE
+									WHEN FLAG_VOZ = 1
+									AND FLAG_URA = 1
+									AND TEL_VOZ = TEL_URA THEN 1 ELSE 0
+								END AS VOZ_igual_URA,
+								CASE
+									WHEN FLAG_WA = 1
+									AND FLAG_GTEC = 0
+									AND FLAG_URA = 0
+									AND FLAG_VOZ = 0 THEN 1 ELSE 0
+								END AS WA_UNICO,
+								CASE
+									WHEN FLAG_WA = 0
+									AND FLAG_GTEC = 1
+									AND FLAG_URA = 0
+									AND FLAG_VOZ = 0 THEN 1 ELSE 0
+								END AS GTEC_UNICO,
+								CASE
+									WHEN FLAG_WA = 0
+									AND FLAG_GTEC = 0
+									AND FLAG_URA = 1
+									AND FLAG_VOZ = 0 THEN 1 ELSE 0
+								END AS URA_UNICO,
+								CASE
+									WHEN FLAG_WA = 0
+									AND FLAG_GTEC = 0
+									AND FLAG_URA = 0
+									AND FLAG_VOZ = 1 THEN 1 ELSE 0
+								END AS VOZ_UNICO
+							FROM (
+									SELECT T1.*,
+										CONCAT(
+											CAST(FLAG_WA AS string),
+											CAST(FLAG_GTEC AS string),
+											CAST(FLAG_URA AS string),
+											CAST(FLAG_VOZ AS string)
+										) AS CODIGO_FLAG
+									FROM (
+											SELECT BASE_TEL_CONSOLIDADA.*,
+												CASE
+													WHEN TEL_WA IS NOT NULL THEN 1 ELSE 0
+												END AS FLAG_WA,
+												CASE
+													WHEN TEL_GTEC IS NOT NULL THEN 1 ELSE 0
+												END AS FLAG_GTEC,
+												CASE
+													WHEN TEL_URA IS NOT NULL THEN 1 ELSE 0
+												END AS FLAG_URA,
+												CASE
+													WHEN TEL_VOZ IS NOT NULL THEN 1 ELSE 0
+												END AS FLAG_VOZ
+											FROM BASE_TEL_CONSOLIDADA
+										) T1
+									ORDER BY NU_SO_EC ASC
+								) T2
+						) T3
+				) T4
+		) T5
+		LEFT JOIN PROP_STAR ST_PROP ON T5.NU_SO_EC = CAST(ST_PROP.NU_CUSTOMER AS bigint)
+		AND T5.TEL_PRIORIZADO = ST_PROP.TEL_COMPLETO_STAR
+		LEFT JOIN CONTATO_STAR ST_CONTATO ON T5.NU_SO_EC = CAST(ST_CONTATO.NU_CUSTOMER AS bigint)
+		AND T5.TEL_PRIORIZADO = ST_CONTATO.TEL_COMPLETO_STAR
+		LEFT JOIN sie.tbdwr_ec EC ON T5.NU_SO_EC = EC.NU_SO_EC
+	where sk_unde_ngco in (4, 5) -- remover grandes contas, mantem apenas varejo
+		-- e empreendedores
+)
+
+insert into re_sb_inteligencia_logistica.tbciar_re_clnt_scr_tlfn_whsp
+SELECT 
+    NU_SO_EC as nu_so_ec, 
+    TEL_WA as nu_tlfn_whsp, 
+    ULTIMA_INTERACAO_WA as dh_ultm_iter_whsp, 
+    QTD_INTERACOES_WA as qt_iter_whsp,
+    TEL_GTEC as nu_tlfn_gtec, 
+    ULTIMA_INTERACAO_GTEC as dh_ultm_iter_gtec, 
+    QTD_INTERACOES_GTEC as qt_iter_gtec, 
+    TEL_URA as nu_tlfn_ura,
+    ULTIMA_INTERACAO_URA as dh_ultm_iter_ura, 
+    QTD_INTERACOES_URA as qt_iter_ura, 
+    TEL_VOZ as nu_tlfn_voz,
+    ULTIMA_INTERACAO_VOZ as dh_ultm_iter_voz, 
+    QTD_INTERACOES_VOZ as qt_iter_voz, 
+    TEL_CPC as nu_tlfn_cpc,
+    CADASTRO_TEL_WA as dc_cdst_tbla_star_tlfn_whsp, 
+    CADASTRO_TEL_GTEC as dc_cdst_tbla_star_tlfn_gtec, 
+    CADASTRO_TEL_URA as dc_cdst_tbla_star_tlfn_ura,
+    CADASTRO_TEL_VOZ as dc_cdst_tbla_star_tlfn_voz,
+    CODIGO_FLAG as cd_in_cond, 
+    FLAG_WA as in_whsp, 
+    FLAG_GTEC as in_gtec, 
+    FLAG_URA as in_ura, 
+    FLAG_VOZ as in_voz,
+    WA_igual_GTEC_igual_URA_igual_VOZ as in_whsp_igal_gtec_igal_ura_igal_voz,
+    WA_igual_GTEC_igual_VOZ as in_whsp_igal_gtec_igal_voz, 
+    WA_igual_GTEC_igual_URA as in_whsp_igal_gtec_igal_ura, 
+    WA_igual_GTEC as in_whsp_igal_gtec, 
+    WA_igual_URA as in_whsp_igal_ura, 
+    WA_igual_VOZ as in_whsp_igal_voz, 
+    GTEC_igual_URA as in_gtec_igal_ura, 
+    GTEC_igual_VOZ as in_gtec_igal_voz, 
+    VOZ_igual_URA as in_voz_igal_ura, 
+    WA_UNICO as in_whsp_unco, 
+    GTEC_UNICO as in_gtec_unco, 
+    URA_UNICO as in_ura_unco, 
+    VOZ_UNICO as in_voz_unco, 
+    SCORE_TEL_EC as dc_scr_tlfn_ec, 
+    TEL_PRIORIZADO as nu_tlfn_przd, 
+    CADASTRO_TEL_PRIORIZADO as dc_cdst_tbla_star_tlfn_przd, 
+    FLAG_EC_ATIVO as in_ec_atvo,
+    current_date as dt_atlc
+FROM COMP_FLAG
