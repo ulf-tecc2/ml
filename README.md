@@ -4,12 +4,11 @@
 
 ## Documentation
 
-[**Documentation**](https://ulf-tecc2.github.io/ml/)
+[**Documentation**](https://ulf-tecc2.github.io/ml/site)
 
 ## Functions Library
 
 General reusable Python functions to use im ML projects.
-
 
 ## Cases
 
